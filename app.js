@@ -1,7 +1,7 @@
 // =========================================================================
 // CONFIGURACIÓN GLOBAL (EDÍTALO CON TU URL DE APPS SCRIPT)
 // =========================================================================
-const API_URL = "PEGAR_AQUI_LA_URL_DEL_WEB_APP";
+const API_URL = "https://script.google.com/macros/s/AKfycbw-sT5ObrEYEiH7q5aBZwRFZ0aB7sH3eCL0UOhWrgtHiJNbpnH5jiFWVi0DCNTDHcYv/exec";
 
 const app = {
     data: {
