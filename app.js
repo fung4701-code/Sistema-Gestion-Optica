@@ -1,10 +1,10 @@
 // =========================================================================
-// CONFIGURACIÓN GLOBAL (EDÍTALO CON TU URL DE APPS SCRIPT QUE TERMINA EN /exec)
+// CONFIGURACIÓN GLOBAL (Pega aquí tu Web App URL que termina en /exec)
 // =========================================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyxp4zKDPz9Fyx9SyYNDIKwSIzvt4mlo3o2TcCDKK24VRb_Sz58TaIQlAQYczKHxtOo/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzDATdDglHIU7eY9XCXzu_HOetV9q4FoYlzDwK5uV1tCJJqahERHtVyTtx1H_23Dlw/exec";
 
 const app = {
-    data: { inventario: [], ventas: [], ingresos: [], egresos: [], abonos: [] },
+    data: { inventario: [], ventas: [], ingresos: [], egresos: [], abonos: [], cuentas_pagar: [] },
     chartInstance: null,
 
     init() {
@@ -12,12 +12,15 @@ const app = {
         document.getElementById('venta-fecha').valueAsDate = new Date();
         document.getElementById('egreso-fecha').valueAsDate = new Date();
         document.getElementById('abono-fecha').valueAsDate = new Date();
+        document.getElementById('deuda-prov-fecha').valueAsDate = new Date();
+        document.getElementById('pagar-prov-fecha').valueAsDate = new Date();
     },
 
     loadView(viewName) {
         document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
         document.getElementById(`view-${viewName}`).classList.remove('hidden');
-        document.getElementById('view-title').innerText = viewName === 'cobranzas' ? 'Créditos y Cobranzas' : viewName.charAt(0).toUpperCase() + viewName.slice(1);
+        const titles = { 'cobranzas': 'Cuentas x Cobrar (Pacientes)', 'proveedores': 'Cuentas x Pagar (Proveedores)' };
+        document.getElementById('view-title').innerText = titles[viewName] || viewName.charAt(0).toUpperCase() + viewName.slice(1);
     },
 
     toggleModal(modalId) {
@@ -29,6 +32,7 @@ const app = {
                 document.getElementById('venta-deuda').innerText = '$0.00';
             }
             if(modalId === 'modal-egreso') document.getElementById('auto-id-egreso').value = 'E-' + Date.now();
+            if(modalId === 'modal-deuda-proveedor') document.getElementById('auto-id-deuda').value = 'DP-' + Date.now();
         } else {
             modal.classList.add('hidden');
         }
@@ -41,29 +45,47 @@ const app = {
         document.getElementById('venta-deuda').innerText = `$${deuda.toFixed(2)}`;
     },
 
-    // NUEVO: Lógica Bidireccional de Conversión USD / Bs
     calcMoneda(origen, inputModificado) {
         let montoUsd = 0;
         let inputTasa, inputBs;
-
         if (origen === 'ventas') {
             montoUsd = Number(document.getElementById('venta-abono').value) || 0;
-            inputTasa = document.getElementById('venta-tasa');
-            inputBs = document.getElementById('venta-bs');
+            inputTasa = document.getElementById('venta-tasa'); inputBs = document.getElementById('venta-bs');
         } else if (origen === 'abono') {
             montoUsd = Number(document.getElementById('abono-monto').value) || 0;
-            inputTasa = document.getElementById('abono-tasa');
-            inputBs = document.getElementById('abono-bs');
+            inputTasa = document.getElementById('abono-tasa'); inputBs = document.getElementById('abono-bs');
         }
-
         if (montoUsd <= 0) return;
-
         if (inputModificado === 'tasa') {
             const tasa = Number(inputTasa.value) || 0;
             if (tasa > 0) inputBs.value = (montoUsd * tasa).toFixed(2);
         } else if (inputModificado === 'bs') {
             const bs = Number(inputBs.value) || 0;
             if (bs > 0) inputTasa.value = (bs / montoUsd).toFixed(4);
+        }
+    },
+
+    toggleDescuento() {
+        const isChecked = document.getElementById('abono-descuento').checked;
+        const monedaSec = document.getElementById('abono-moneda-section');
+        const metodoSelect = document.getElementById('abono-metodo');
+        const justificacionInput = document.getElementById('abono-justificacion');
+        const lblMonto = document.getElementById('lbl-abono-monto');
+
+        if(isChecked) {
+            monedaSec.classList.add('hidden');
+            metodoSelect.classList.add('hidden');
+            metodoSelect.disabled = true;
+            justificacionInput.classList.remove('hidden');
+            justificacionInput.disabled = false;
+            lblMonto.innerText = "Monto a Condenar/Descontar (USD):";
+        } else {
+            monedaSec.classList.remove('hidden');
+            metodoSelect.classList.remove('hidden');
+            metodoSelect.disabled = false;
+            justificacionInput.classList.add('hidden');
+            justificacionInput.disabled = true;
+            lblMonto.innerText = "Monto a Abonar (USD):";
         }
     },
 
@@ -77,6 +99,7 @@ const app = {
             const response = await fetch(`${API_URL}?action=getDashboard`);
             const result = await response.json();
             this.data = result;
+            if(!this.data.cuentas_pagar) this.data.cuentas_pagar = [];
             this.renderAll();
         } catch (error) {
             console.error(error);
@@ -92,20 +115,17 @@ const app = {
             const abono = Number(document.getElementById('venta-abono').value);
             if(abono > total) return alert("El abono inicial no puede ser mayor al Costo Total.");
         }
-
         this.setLoading(true);
         const form = event.target;
         const dataObj = Object.fromEntries(new FormData(form).entries());
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ action: 'insert', sheet: sheetName, data: dataObj })
-            });
+            const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'insert', sheet: sheetName, data: dataObj }) });
             const result = await response.json();
             if(result.status === 'success'){
                 form.reset();
-                this.toggleModal(`modal-${sheetName.toLowerCase() === 'egresos' ? 'egreso' : sheetName.toLowerCase()}`);
+                let modalStr = `modal-${sheetName.toLowerCase() === 'egresos' ? 'egreso' : (sheetName === 'Cuentas_Pagar' ? 'deuda-proveedor' : sheetName.toLowerCase())}`;
+                this.toggleModal(modalStr);
                 await this.loadDashboardData();
             }
         } catch (error) { console.error(error); }
@@ -117,6 +137,8 @@ const app = {
         document.getElementById('abono-cliente').value = cliente;
         document.getElementById('lbl-abono-cliente').innerText = cliente;
         document.getElementById('lbl-abono-deuda').innerText = `$${Number(saldo).toFixed(2)}`;
+        document.getElementById('abono-descuento').checked = false;
+        this.toggleDescuento();
         this.toggleModal('modal-abono');
     },
 
@@ -124,17 +146,20 @@ const app = {
         event.preventDefault();
         const abonoInput = Number(document.getElementById('abono-monto').value);
         const deudaMax = Number(document.getElementById('lbl-abono-deuda').innerText.replace('$',''));
-        if (abonoInput > deudaMax) return alert("El abono no puede superar la deuda actual.");
+        if (abonoInput > deudaMax) return alert("El monto no puede superar la deuda actual.");
 
         this.setLoading(true);
         const form = event.target;
-        const dataObj = Object.fromEntries(new FormData(form).entries());
+        const formData = new FormData(form);
+        
+        if(!document.getElementById('abono-descuento').checked) {
+            formData.set('Es_Descuento', 'false');
+        }
+
+        const dataObj = Object.fromEntries(formData.entries());
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ action: 'abono', data: dataObj })
-            });
+            const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'abono', data: dataObj }) });
             const result = await response.json();
             if(result.status === 'success'){
                 form.reset();
@@ -145,10 +170,41 @@ const app = {
         this.setLoading(false);
     },
 
+    openPagarProvModal(idDeuda, proveedor, saldo) {
+        document.getElementById('pagar-prov-id').value = idDeuda;
+        document.getElementById('pagar-prov-nombre').value = proveedor;
+        document.getElementById('lbl-pagar-prov').innerText = proveedor;
+        document.getElementById('lbl-pagar-deuda').innerText = `$${Number(saldo).toFixed(2)}`;
+        this.toggleModal('modal-pagar-proveedor');
+    },
+
+    async submitAbonoProveedor(event) {
+        event.preventDefault();
+        const abonoInput = Number(document.getElementById('pagar-prov-monto').value);
+        const deudaMax = Number(document.getElementById('lbl-pagar-deuda').innerText.replace('$',''));
+        if (abonoInput > deudaMax) return alert("El pago no puede superar la deuda actual.");
+
+        this.setLoading(true);
+        const form = event.target;
+        const dataObj = Object.fromEntries(new FormData(form).entries());
+
+        try {
+            const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'abono_proveedor', data: dataObj }) });
+            const result = await response.json();
+            if(result.status === 'success'){
+                form.reset();
+                this.toggleModal('modal-pagar-proveedor');
+                await this.loadDashboardData();
+            }
+        } catch (error) { console.error(error); }
+        this.setLoading(false);
+    },
+
     renderAll() {
         this.renderInventory(this.data.inventario);
         this.renderVentas(this.data.ventas);
         this.renderCobranzas(this.data.ventas);
+        this.renderProveedores(this.data.cuentas_pagar);
         this.renderEgresos(this.data.egresos);
         this.calculateFinancials();
     },
@@ -204,7 +260,25 @@ const app = {
                 <td class="p-3">$${venta.Total}</td>
                 <td class="p-3 font-bold text-red-600">$${venta.Saldo_Pendiente}</td>
                 <td class="p-3">
-                    <button onclick="app.openAbonoModal('${venta.ID_Venta}', '${venta.Cliente}', ${venta.Saldo_Pendiente})" class="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 text-xs font-bold">Abonar</button>
+                    <button onclick="app.openAbonoModal('${venta.ID_Venta}', '${venta.Cliente}', ${venta.Saldo_Pendiente})" class="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 text-xs font-bold">Abonar/Descontar</button>
+                </td>
+            </tr>`
+        ).join('');
+    },
+
+    renderProveedores(proveedores) {
+        if(!proveedores) return;
+        const pendientes = proveedores.filter(p => Number(p.Saldo_Pendiente) > 0);
+        document.getElementById('table-proveedores').innerHTML = pendientes.map(p => `
+            <tr class="hover:bg-gray-50">
+                <td class="p-3 font-medium text-red-600">${p.ID_Deuda}</td>
+                <td class="p-3">${new Date(p.Fecha).toLocaleDateString()}</td>
+                <td class="p-3 font-bold">${p.Proveedor}</td>
+                <td class="p-3 text-sm">${p.Concepto}</td>
+                <td class="p-3">$${p.Monto_Total}</td>
+                <td class="p-3 font-bold text-red-600">$${p.Saldo_Pendiente}</td>
+                <td class="p-3">
+                    <button onclick="app.openPagarProvModal('${p.ID_Deuda}', '${p.Proveedor}', ${p.Saldo_Pendiente})" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-xs font-bold">Pagar</button>
                 </td>
             </tr>`
         ).join('');
@@ -227,16 +301,18 @@ const app = {
         const totalEgresos = this.data.egresos.reduce((acc, curr) => acc + Number(curr.Monto || 0), 0);
         const neto = totalIngresos - totalEgresos;
         const totalPorCobrar = this.data.ventas.reduce((acc, curr) => acc + Number(curr.Saldo_Pendiente || 0), 0);
+        const totalPorPagar = (this.data.cuentas_pagar || []).reduce((acc, curr) => acc + Number(curr.Saldo_Pendiente || 0), 0);
 
         document.getElementById('dash-ingresos').innerText = `$${totalIngresos.toFixed(2)}`;
         document.getElementById('dash-egresos').innerText = `$${totalEgresos.toFixed(2)}`;
         document.getElementById('dash-balance').innerText = `$${neto.toFixed(2)}`;
         document.getElementById('dash-cobrar').innerText = `$${totalPorCobrar.toFixed(2)}`;
+        document.getElementById('dash-pagar').innerText = `$${totalPorPagar.toFixed(2)}`;
 
-        this.updateChart(totalIngresos, totalEgresos, totalPorCobrar);
+        this.updateChart(totalIngresos, totalEgresos, totalPorCobrar, totalPorPagar);
     },
 
-    updateChart(ingresos, egresos, porCobrar) {
+    updateChart(ingresos, egresos, porCobrar, porPagar) {
         const ctx = document.getElementById('financeChart').getContext('2d');
         if (this.chartInstance) this.chartInstance.destroy();
 
@@ -245,9 +321,10 @@ const app = {
             data: {
                 labels: ['Métricas Financieras (USD)'],
                 datasets: [
-                    { label: 'Ingresos Reales (Caja)', data: [ingresos], backgroundColor: 'rgba(59, 130, 246, 0.8)' },
+                    { label: 'Caja Ingresos', data: [ingresos], backgroundColor: 'rgba(59, 130, 246, 0.8)' },
                     { label: 'Cuentas x Cobrar (Calle)', data: [porCobrar], backgroundColor: 'rgba(234, 179, 8, 0.8)' },
-                    { label: 'Egresos Operativos', data: [egresos], backgroundColor: 'rgba(239, 68, 68, 0.8)' }
+                    { label: 'Cuentas x Pagar (Deudas)', data: [porPagar], backgroundColor: 'rgba(153, 27, 27, 0.8)' },
+                    { label: 'Caja Egresos', data: [egresos], backgroundColor: 'rgba(239, 68, 68, 0.8)' }
                 ]
             },
             options: { responsive: true, maintainAspectRatio: false }
